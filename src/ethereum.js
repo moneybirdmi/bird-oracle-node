@@ -45,15 +45,16 @@ export const updateRequest = ({ id, valueRetrieved }) => {
     var encodedABI;
     privateKey = variables.PRIVATE_KEYS[process.env.ACCOUNT];
     encodedABI = contract.methods
-      .updatedChainRequest(id, valueRetrieved)
+      .updateChainRequest(id, valueRetrieved)
       .encodeABI();
     sendMethod(privateKey, encodedABI).then(resolve).catch(reject);
 
-    // privateKey = variables.PRIVATE_KEYS[1];
-    // encodedABI = contract.methods
-    //   .updatedChainRequest(id, valueRetrieved)
-    //   .encodeABI();
-    // sendMethod(privateKey, encodedABI).then(resolve).catch(reject);
+    //these 5 lines are for development only. todo comment these in production.
+    privateKey = variables.PRIVATE_KEYS[3];
+    encodedABI = contract.methods
+      .updateChainRequest(id, valueRetrieved)
+      .encodeABI();
+    sendMethod(privateKey, encodedABI).then(resolve).catch(reject);
   });
 };
 
