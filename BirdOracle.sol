@@ -11,13 +11,19 @@ Bird On-chain Oracle to confirm rating with 2+ consensus before update using the
 contract BirdOracle {
     BirdRequest[] public onChainRequests; //keep track of list of on-chain
 
-    uint256 public minConsensus = 2; //minimum number of consensus before confirmation
-    uint256 public birdNest = 3; // bird consensus count
+    address public owner;
+
+    uint256 public minConsensus = 0; //minimum number of consensus before confirmation
+    uint256 public birdNest = 0; // bird consensus count
     uint256 public trackId = 0;
 
-    uint8 constant notTrusted = 0;
-    uint8 constant trustedAndNotVoted = 1;
-    uint8 constant trustedAndVoted = 2;
+    uint8 constant NOT_TRUSTED = 0;
+
+    uint8 constant NOT_VOTED = 0;
+    uint8 constant TRUSTED = 1;
+    uint8 constant VOTED = 2;
+
+    mapping(address => uint256) nest; //offchain data provider address => TRUSTED or NOT
 
     /**
      * Bird Standard API Request
@@ -26,8 +32,8 @@ contract BirdOracle {
      * key: "bird_rating"
      * value: 400000000000000000   // 4.0
      * resolved: true / false
-     * response: response from off-chain oracles
-     * nest: approved off-chain oracles nest/addresses and keep track of vote (1= trusted and not voted, 2=voted)
+     * response: 000000010000=> 2  (specific answer => number of votes of that answer)
+     * nest: approved off-chain oracles nest/addresses and keep track of vote (1= TRUSTED and not voted, 2=voted)
      */
 
     struct BirdRequest {
@@ -37,7 +43,7 @@ contract BirdOracle {
         uint256 value;
         bool resolved;
         mapping(uint256 => uint256) response; //specific answer => number of votes of that answer
-        mapping(address => uint256) nest; //address => trusted or not, voted or not
+        mapping(address => uint256) nest; //offchain data provider address => VOTED or NOT
     }
 
     mapping(address => uint256) public ratings; //saved ratings after consensus
@@ -58,33 +64,55 @@ contract BirdOracle {
         uint256 value
     );
 
+    event ProviderAdded(address provider);
+    event ProviderRemoved(address provider);
+
+    constructor() public {
+        owner = msg.sender;
+        /**
+         * Add some TRUSTED oracles in bird nest
+         */
+        addProvider(0x35fA8692EB10F87D17Cd27fB5488598D33B023E5);
+        addProvider(0x58Fd79D34Edc6362f92c6799eE46945113A6EA91);
+        addProvider(0x0e4338DFEdA53Bc35467a09Da483410664d34e88);
+    }
+
+    function addProvider(address _provider) public {
+        require(msg.sender == owner);
+        require(nest[_provider] == NOT_TRUSTED, "Provider is already added.");
+
+        nest[_provider] = TRUSTED;
+        /**
+         * minConsensus is 50% of nodes. after every 2nd provider added increase minConsensus by 1.
+         */
+        if ((++birdNest + 1) % 2 == 0) ++minConsensus;
+
+        emit ProviderAdded(_provider);
+    }
+
+    function removeProvider(address _provider) public {
+        require(msg.sender == owner);
+        require(nest[_provider] == TRUSTED, "Provider is already removed.");
+
+        nest[_provider] = NOT_TRUSTED;
+        /**
+         * minConsensus is 50% of nodes. after every 2nd provider removed decrease minConsensus by 1.
+         */
+        if (--birdNest % 2 == 0) --minConsensus;
+
+        emit ProviderRemoved(_provider);
+    }
+
     function newChainRequest(address _ethAddress, string memory _key) public {
-        uint256 length =
-            onChainRequests.push(
-                BirdRequest({
-                    id: trackId,
-                    ethAddress: _ethAddress,
-                    key: _key,
-                    value: 0, // if resolved is true then read value
-                    resolved: false // if resolved is false then value do not matter
-                })
-            );
-
-        BirdRequest storage r = onChainRequests[length - 1];
-
-        /**
-         * trusted oracles in bird nest
-         */
-        address bird1 = 0x35fA8692EB10F87D17Cd27fB5488598D33B023E5;
-        address bird2 = 0x58Fd79D34Edc6362f92c6799eE46945113A6EA91;
-        address bird3 = 0x0e4338DFEdA53Bc35467a09Da483410664d34e88;
-
-        /**
-         * track votes
-         */
-        r.nest[bird1] = trustedAndNotVoted;
-        r.nest[bird2] = trustedAndNotVoted;
-        r.nest[bird3] = trustedAndNotVoted;
+        onChainRequests.push(
+            BirdRequest({
+                id: trackId,
+                ethAddress: _ethAddress,
+                key: _key,
+                value: 0, // if resolved is true then read value
+                resolved: false // if resolved is false then value do not matter
+            })
+        );
 
         /**
          * Off-Chain event trigger
@@ -109,11 +137,17 @@ contract BirdOracle {
             "Error: Consensus is complete so you can not vote."
         );
         require(
-            req.nest[address(msg.sender)] == trustedAndNotVoted,
-            "Error: You can not vote."
+            nest[address(msg.sender)] == TRUSTED,
+            "Error: You are not allowed to vote."
         );
 
-        req.nest[msg.sender] = trustedAndVoted;
+        require(
+            req.nest[address(msg.sender)] == NOT_VOTED,
+            "Error: You have already voted."
+        );
+
+        req.nest[msg.sender] = VOTED;
+
         if (minConsensus <= ++req.response[_valueResponse]) {
             req.resolved = true;
             req.value = _valueResponse;
